@@ -1,0 +1,47 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+}
+
+#companion {
+  width: 96px;
+  height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Placeholder circle — task "Пиксель-арт спрайты" replaces this with real
+   frames, one class per CompanionState value from the Rust/JS state enum. */
+.sprite {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: #4f8cff;
+  transition: background-color 150ms ease;
+}
+
+.state-idle .sprite {
+  background: #4f8cff;
+}
+.state-thinking .sprite {
+  background: #a855f7;
+}
+.state-typing .sprite {
+  background: #22c55e;
+}
+.state-waitingForInput .sprite {
+  background: #eab308;
+}
+.state-error .sprite {
+  background: #ef4444;
+}
+.state-done .sprite {
+  background: #64748b;
+}
