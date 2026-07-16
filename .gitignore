@@ -6,5 +6,6 @@ DerivedData/
 node_modules/
 src-tauri/target/
 src-tauri/gen/
+/target/
 Cargo.lock
 !crates/companion-state/Cargo.lock
