@@ -1,9 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::sync::Mutex;
-use tauri::{Emitter, Manager};
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use companion_state::StateMachine;
+
+const CHAT_WINDOW_LABEL: &str = "chat";
 
 /// Kept as a plain string over the wire so the frontend owns rendering and
 /// doesn't need to know about the Rust enum's serde repr.
@@ -53,6 +55,37 @@ fn ingest_transcript_line(
     Ok(Some(state_str))
 }
 
+/// Opens the chat popup window next to the companion, or focuses it if
+/// already open. Creates it lazily on first click rather than at startup —
+/// no point paying for a second webview before anyone asks for it.
+///
+/// UI-only right now (see src/chat/chat.js) — sending/receiving real
+/// messages is task "Подключение чат-попапа к Claude Code", not started.
+#[tauri::command]
+fn toggle_chat_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(existing) = app.get_webview_window(CHAT_WINDOW_LABEL) {
+        if existing.is_visible().map_err(|e| e.to_string())? {
+            existing.hide().map_err(|e| e.to_string())?;
+        } else {
+            existing.show().map_err(|e| e.to_string())?;
+            existing.set_focus().map_err(|e| e.to_string())?;
+        }
+        return Ok(());
+    }
+
+    WebviewWindowBuilder::new(&app, CHAT_WINDOW_LABEL, WebviewUrl::App("chat/index.html".into()))
+        .title("Companion Chat")
+        .inner_size(320.0, 420.0)
+        .resizable(true)
+        .decorations(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(AppState {
@@ -60,7 +93,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             set_click_through,
-            ingest_transcript_line
+            ingest_transcript_line,
+            toggle_chat_window
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").expect("main window must exist");

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Companion Chat</title>
+    <link rel="stylesheet" href="chat.css" />
+  </head>
+  <body>
+    <main id="log" aria-live="polite">
+      <div class="msg msg-assistant">
+        <span class="bubble">Привет! Пока это только каркас — отправка сообщений ещё не подключена к Claude Code.</span>
+      </div>
+    </main>
+    <form id="composer">
+      <input id="input" type="text" placeholder="Написать..." autocomplete="off" />
+      <button type="submit">Send</button>
+    </form>
+    <script type="module" src="chat.js"></script>
+  </body>
+</html>

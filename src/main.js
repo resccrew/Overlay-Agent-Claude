@@ -24,9 +24,8 @@ listen("companion-state-changed", (event) => {
   applyState(event.payload.state);
 });
 
-// Placeholder click handler — task "UI чат-попапа" wires this up for real.
 companion.addEventListener("click", () => {
-  console.log("Companion clicked");
+  invoke("toggle_chat_window").catch((err) => console.error("toggle_chat_window failed", err));
 });
 
 applyState("idle");
