@@ -1,11 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::sync::Mutex;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use companion_state::StateMachine;
 
 const CHAT_WINDOW_LABEL: &str = "chat";
+const MAIN_WINDOW_LABEL: &str = "main";
 
 /// Kept as a plain string over the wire so the frontend owns rendering and
 /// doesn't need to know about the Rust enum's serde repr.
@@ -97,8 +100,40 @@ fn main() {
             toggle_chat_window
         ])
         .setup(|app| {
-            let window = app.get_webview_window("main").expect("main window must exist");
+            let window = app
+                .get_webview_window(MAIN_WINDOW_LABEL)
+                .expect("main window must exist");
             window.set_always_on_top(true)?;
+
+            // Fallback access to the companion if it wanders off-screen while
+            // roaming, or gets hidden some other way — click the tray icon to
+            // bring it back.
+            let toggle_item = MenuItem::with_id(app, "toggle_main", "Show/Hide Companion", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(app, &[&toggle_item, &quit_item])?;
+
+            TrayIconBuilder::new()
+                .icon(app.default_window_icon().cloned().expect("default window icon must be configured"))
+                .menu(&tray_menu)
+                .show_menu_on_left_click(true)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "toggle_main" => {
+                        let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) else {
+                            return;
+                        };
+                        let is_visible = window.is_visible().unwrap_or(false);
+                        if is_visible {
+                            let _ = window.hide();
+                        } else {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .build(app)?;
+
             Ok(())
         })
         .run(tauri::generate_context!())
