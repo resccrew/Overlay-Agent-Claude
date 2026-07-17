@@ -30,6 +30,9 @@ body {
 .state-idle .sprite {
   background: #4f8cff;
 }
+.state-roaming .sprite {
+  background: #38bdf8;
+}
 .state-thinking .sprite {
   background: #a855f7;
 }
