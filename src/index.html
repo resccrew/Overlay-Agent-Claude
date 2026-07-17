@@ -6,11 +6,12 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <!-- data-tauri-drag-region makes the whole body draggable, same role as
-         isMovableByWindowBackground in the old Swift skeleton -->
+    <!-- Dragging is handled manually in main.js (mousedown/mousemove threshold),
+         not via data-tauri-drag-region -- that's needed to tell a click
+         (open chat) apart from a drag (move window). -->
     <div id="companion" class="state-idle">
       <div class="sprite"></div>
     </div>
-    <script type="module" src="main.js"></script>
+    <script src="main.js"></script>
   </body>
 </html>

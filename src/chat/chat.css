@@ -58,6 +58,10 @@ header:active {
   cursor: pointer;
   padding: 0 4px;
   opacity: 0.6;
+  /* header has data-tauri-drag-region -- without this the button's own
+     click can get swallowed by the window-drag gesture instead of firing.
+     Same fix already used for #companion in ../styles.css. */
+  -webkit-app-region: no-drag;
 }
 
 #close-btn:hover {
@@ -74,6 +78,22 @@ header:active {
   gap: 12px;
 }
 
+/* Default WebKit scrollbar is a plain grey system bar that clashes with
+   the glass look -- thin it out and tint it to match. */
+#log::-webkit-scrollbar {
+  width: 6px;
+}
+#log::-webkit-scrollbar-track {
+  background: transparent;
+}
+#log::-webkit-scrollbar-thumb {
+  background: rgba(255, 105, 180, 0.35);
+  border-radius: 3px;
+}
+#log::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 105, 180, 0.55);
+}
+
 .msg { display: flex; }
 .msg-assistant { justify-content: flex-start; }
 .msg-user { justify-content: flex-end; }
@@ -85,6 +105,12 @@ header:active {
   line-height: 1.4;
   font-size: 14px;
   box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  /* Claude replies can contain long unbroken tokens (URLs, paths, code) --
+     without this they'd overflow the bubble and poke past its rounded
+     corners instead of wrapping. */
+  overflow-wrap: break-word;
+  word-break: break-word;
+  white-space: pre-wrap;
 }
 
 .msg-assistant .bubble {
