@@ -15,6 +15,11 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Near-invisible background so macOS registers mouse events
+     on this transparent window (fully transparent = click-through) */
+  background: rgba(0, 0, 0, 0.01);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
 }
 
 /* Pixel-art companion, one frame per CompanionState value from the Rust/JS

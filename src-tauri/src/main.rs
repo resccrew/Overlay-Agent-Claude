@@ -85,25 +85,54 @@ fn ingest_transcript_line(
 /// messages is task "Подключение чат-попапа к Claude Code", not started.
 #[tauri::command]
 fn toggle_chat_window(app: tauri::AppHandle) -> Result<(), String> {
+    let main_window = app
+        .get_webview_window(MAIN_WINDOW_LABEL)
+        .ok_or_else(|| "Main window not found".to_string())?;
+
+    let main_pos = main_window.outer_position().map_err(|e| e.to_string())?;
+    let main_size = main_window.outer_size().map_err(|e| e.to_string())?;
+    let scale_factor = main_window.scale_factor().map_err(|e| e.to_string())?;
+
+    let chat_width_logical = 320.0;
+    let chat_height_logical = 420.0;
+
+    let chat_width_physical = (chat_width_logical * scale_factor) as i32;
+    let chat_height_physical = (chat_height_logical * scale_factor) as i32;
+
+    // Try to place it 20px above the companion's head
+    let chat_x = main_pos.x + (main_size.width as i32 / 2) - (chat_width_physical / 2);
+    let mut chat_y = main_pos.y - chat_height_physical - 20;
+
+    // If it doesn't fit on the screen above the companion, place it below instead
+    if chat_y < 20 {
+        chat_y = main_pos.y + main_size.height as i32 + 20;
+    }
+
+    let position = tauri::Position::Physical(tauri::PhysicalPosition::new(chat_x, chat_y));
+
     if let Some(existing) = app.get_webview_window(CHAT_WINDOW_LABEL) {
         if existing.is_visible().map_err(|e| e.to_string())? {
             existing.hide().map_err(|e| e.to_string())?;
         } else {
+            existing.set_position(position).map_err(|e| e.to_string())?;
             existing.show().map_err(|e| e.to_string())?;
             existing.set_focus().map_err(|e| e.to_string())?;
         }
         return Ok(());
     }
 
-    WebviewWindowBuilder::new(&app, CHAT_WINDOW_LABEL, WebviewUrl::App("chat/index.html".into()))
+    let win = WebviewWindowBuilder::new(&app, CHAT_WINDOW_LABEL, WebviewUrl::App("chat/index.html".into()))
         .title("Companion Chat")
-        .inner_size(320.0, 420.0)
-        .resizable(true)
-        .decorations(true)
+        .inner_size(chat_width_logical, chat_height_logical)
+        .resizable(false)
+        .decorations(false) // No OS decorations
+        .transparent(true)  // Semi-transparent background
         .always_on_top(true)
         .skip_taskbar(true)
         .build()
         .map_err(|e| e.to_string())?;
+
+    win.set_position(position).map_err(|e| e.to_string())?;
 
     Ok(())
 }
@@ -122,6 +151,7 @@ fn toggle_chat_window(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn send_chat_message(chat: tauri::State<ChatSession>, message: String) -> Result<String, String> {
     let mut cmd = Command::new("claude");
+    cmd.stdin(std::process::Stdio::null());
     cmd.arg("-p").arg(&message).arg("--output-format").arg("json");
 
     let existing_session = chat.session_id.lock().map_err(|e| e.to_string())?.clone();
@@ -138,7 +168,9 @@ fn send_chat_message(chat: tauri::State<ChatSession>, message: String) -> Result
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let parsed: ClaudeCliResult = serde_json::from_str(&stdout)
+    let json_start = stdout.find('{').unwrap_or(0);
+    let json_str = &stdout[json_start..];
+    let parsed: ClaudeCliResult = serde_json::from_str(json_str)
         .map_err(|e| format!("failed to parse claude CLI output: {e}\nraw: {stdout}"))?;
 
     if let Some(id) = parsed.session_id {

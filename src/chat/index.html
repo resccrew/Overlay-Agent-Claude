@@ -6,15 +6,21 @@
     <link rel="stylesheet" href="chat.css" />
   </head>
   <body>
-    <main id="log" aria-live="polite">
-      <div class="msg msg-assistant">
-        <span class="bubble">Привет! Каждое сообщение — реальный вызов Claude Code (платный).</span>
-      </div>
-    </main>
-    <form id="composer">
-      <input id="input" type="text" placeholder="Написать..." autocomplete="off" />
-      <button type="submit">Send</button>
-    </form>
+    <div class="glass-container">
+      <header data-tauri-drag-region>
+        <span class="title">Claude</span>
+        <button id="close-btn">&times;</button>
+      </header>
+      <main id="log" aria-live="polite">
+        <div class="msg msg-assistant">
+          <span class="bubble">Привет! Каждое сообщение — реальный вызов Claude Code (платный).</span>
+        </div>
+      </main>
+      <form id="composer">
+        <input id="input" type="text" placeholder="Написать..." autocomplete="off" />
+        <button type="submit">Send</button>
+      </form>
+    </div>
     <script type="module" src="chat.js"></script>
   </body>
 </html>

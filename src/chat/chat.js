@@ -1,9 +1,11 @@
-import { invoke } from "@tauri-apps/api/core";
+const { invoke } = window.__TAURI__.core;
+const { getCurrentWindow } = window.__TAURI__.window;
 
-// Wired to a real `claude -p` CLI invocation on the Rust side
-// (send_chat_message in src-tauri/src/main.rs). Each message is a real,
-// billed API call -- there's no cost guard yet, see that command's doc
-// comment.
+const currentWin = getCurrentWindow();
+
+document.getElementById("close-btn").addEventListener("click", () => {
+  currentWin.hide();
+});
 
 const log = document.getElementById("log");
 const form = document.getElementById("composer");
@@ -47,3 +49,4 @@ form.addEventListener("submit", async (event) => {
 });
 
 input.focus();
+console.log("✅ Chat JS loaded");
