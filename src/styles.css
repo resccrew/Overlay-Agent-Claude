@@ -17,31 +17,37 @@ body {
   justify-content: center;
 }
 
-/* Placeholder circle — task "Пиксель-арт спрайты" replaces this with real
-   frames, one class per CompanionState value from the Rust/JS state enum. */
+/* Pixel-art companion, one frame per CompanionState value from the Rust/JS
+   state enum (crates/companion-state). Frames are cropped/cleaned from
+   ref/Gemini_Generated_Image_njoyg1njoyg1njoy.png — see assets/companion/. */
 .sprite {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  background: #4f8cff;
-  transition: background-color 150ms ease;
+  width: 100%;
+  height: 100%;
+  background-repeat: no-repeat;
+  background-position: bottom center;
+  background-size: contain;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35));
+  transition: opacity 120ms ease;
 }
 
 .state-idle .sprite {
-  background: #4f8cff;
+  background-image: url("./assets/companion/idle.png");
+}
+.state-roaming .sprite {
+  background-image: url("./assets/companion/roaming.png");
 }
 .state-thinking .sprite {
-  background: #a855f7;
+  background-image: url("./assets/companion/thinking.png");
 }
 .state-typing .sprite {
-  background: #22c55e;
+  background-image: url("./assets/companion/typing.png");
 }
 .state-waitingForInput .sprite {
-  background: #eab308;
+  background-image: url("./assets/companion/waitingForInput.png");
 }
 .state-error .sprite {
-  background: #ef4444;
+  background-image: url("./assets/companion/error.png");
 }
 .state-done .sprite {
-  background: #64748b;
+  background-image: url("./assets/companion/done.png");
 }
