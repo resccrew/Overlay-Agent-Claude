@@ -1,10 +1,14 @@
-// UI-only for now. Wiring this up to a real Claude Code session is a
-// separate, not-yet-started task ("Подключение чат-попапа к Claude Code").
-// Deliberately not faking a connection here.
+import { invoke } from "@tauri-apps/api/core";
+
+// Wired to a real `claude -p` CLI invocation on the Rust side
+// (send_chat_message in src-tauri/src/main.rs). Each message is a real,
+// billed API call -- there's no cost guard yet, see that command's doc
+// comment.
 
 const log = document.getElementById("log");
 const form = document.getElementById("composer");
 const input = document.getElementById("input");
+const sendButton = form.querySelector('button[type="submit"]');
 
 function appendMessage(role, text) {
   const row = document.createElement("div");
@@ -15,20 +19,31 @@ function appendMessage(role, text) {
   row.appendChild(bubble);
   log.appendChild(row);
   log.scrollTop = log.scrollHeight;
+  return row;
 }
 
-form.addEventListener("submit", (event) => {
+form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = input.value.trim();
   if (!text) return;
+
   appendMessage("user", text);
   input.value = "";
+  input.disabled = true;
+  sendButton.disabled = true;
+  const pending = appendMessage("assistant", "…");
 
-  // Stub reply so the UI is visibly interactive without pretending to be
-  // connected to anything real.
-  setTimeout(() => {
-    appendMessage("assistant", "(заглушка — реального подключения к Claude Code пока нет)");
-  }, 200);
+  try {
+    const reply = await invoke("send_chat_message", { message: text });
+    pending.querySelector(".bubble").textContent = reply;
+  } catch (err) {
+    pending.remove();
+    appendMessage("assistant", `Ошибка: ${err}`);
+  } finally {
+    input.disabled = false;
+    sendButton.disabled = false;
+    input.focus();
+  }
 });
 
 input.focus();

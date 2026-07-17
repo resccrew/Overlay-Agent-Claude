@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::process::Command;
 use std::sync::Mutex;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -19,6 +20,24 @@ struct StateChanged {
 
 struct AppState {
     machine: Mutex<StateMachine>,
+}
+
+/// Tracks the Claude Code CLI session id across chat turns so `--resume`
+/// keeps the conversation coherent instead of starting fresh every message.
+#[derive(Default)]
+struct ChatSession {
+    session_id: Mutex<Option<String>>,
+}
+
+/// Subset of `claude -p --output-format json`'s result object we actually
+/// use. Schema confirmed against a real invocation (see commit message) --
+/// deliberately loose (all Option) since it's an undocumented-for-us CLI
+/// output shape and we'd rather degrade than panic if a field is missing.
+#[derive(serde::Deserialize)]
+struct ClaudeCliResult {
+    result: Option<String>,
+    session_id: Option<String>,
+    is_error: Option<bool>,
 }
 
 #[tauri::command]
@@ -89,15 +108,61 @@ fn toggle_chat_window(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Sends one chat message to a real Claude Code CLI (`claude -p`) and
+/// returns its reply. Each call is a real API request with real cost --
+/// confirmed live: a trivial "reply with exactly: pong" cost $0.057.
+/// There's no rate limiting or cost guard here yet; that's a deliberate
+/// gap, not an oversight -- flagging it rather than silently shipping
+/// something that spends money unattended.
+///
+/// Deliberately does NOT pass --dangerously-skip-permissions: this chat
+/// popup should hold a conversation, not get silent shell access. Tool
+/// calls that would need permission simply won't be grantable in this
+/// non-interactive context.
+#[tauri::command]
+fn send_chat_message(chat: tauri::State<ChatSession>, message: String) -> Result<String, String> {
+    let mut cmd = Command::new("claude");
+    cmd.arg("-p").arg(&message).arg("--output-format").arg("json");
+
+    let existing_session = chat.session_id.lock().map_err(|e| e.to_string())?.clone();
+    if let Some(id) = &existing_session {
+        cmd.arg("--resume").arg(id);
+    }
+
+    let output = cmd
+        .output()
+        .map_err(|e| format!("failed to run `claude` CLI (is it installed and on PATH?): {e}"))?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: ClaudeCliResult = serde_json::from_str(&stdout)
+        .map_err(|e| format!("failed to parse claude CLI output: {e}\nraw: {stdout}"))?;
+
+    if let Some(id) = parsed.session_id {
+        *chat.session_id.lock().map_err(|e| e.to_string())? = Some(id);
+    }
+
+    if parsed.is_error.unwrap_or(false) {
+        return Err(parsed.result.unwrap_or_else(|| "claude CLI reported an error".to_string()));
+    }
+
+    parsed.result.ok_or_else(|| "claude CLI returned no result text".to_string())
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(AppState {
             machine: Mutex::new(StateMachine::new()),
         })
+        .manage(ChatSession::default())
         .invoke_handler(tauri::generate_handler![
             set_click_through,
             ingest_transcript_line,
-            toggle_chat_window
+            toggle_chat_window,
+            send_chat_message
         ])
         .setup(|app| {
             let window = app
