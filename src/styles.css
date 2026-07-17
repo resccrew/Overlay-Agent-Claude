@@ -36,6 +36,9 @@ body {
 .state-roaming .sprite {
   background-image: url("./assets/companion/roaming.png");
 }
+.state-roaming .sprite {
+  background: #38bdf8;
+}
 .state-thinking .sprite {
   background-image: url("./assets/companion/thinking.png");
 }
