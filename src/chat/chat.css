@@ -15,16 +15,20 @@ body {
   background: transparent;
 }
 
+/* No backdrop-filter here on purpose: on a fully transparent Tauri/WKWebView
+   window on macOS it tries to blur whatever's on the real desktop behind the
+   window, and that sampling is unreliable -- it goes stale and doesn't
+   redraw in step with the window, which read as a smeared, shifting blob
+   instead of a clean frosted panel. A solid-ish tinted background gives the
+   same "glass" feel without depending on that broken compositing path. */
 .glass-container {
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: rgba(30, 20, 30, 0.45);
+  background: rgba(24, 17, 24, 0.92);
   border: 1px solid rgba(255, 105, 180, 0.6);
   border-radius: 20px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), inset 0 0 10px rgba(255, 105, 180, 0.2);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
   overflow: hidden;
 }
 

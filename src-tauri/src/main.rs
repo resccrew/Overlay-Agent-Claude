@@ -4,7 +4,7 @@ use std::process::Command;
 use std::sync::Mutex;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 use companion_state::StateMachine;
 
@@ -77,6 +77,34 @@ fn ingest_transcript_line(
     Ok(Some(state_str))
 }
 
+const CHAT_WIDTH_LOGICAL: f64 = 320.0;
+const CHAT_HEIGHT_LOGICAL: f64 = 420.0;
+
+/// Where the chat popup should sit relative to the companion right now:
+/// centered above its head, or below if that would run off the top of the
+/// screen. Shared by `toggle_chat_window` (initial placement) and the
+/// main-window `Moved` handler (keeps it pinned as the companion moves,
+/// e.g. while roaming) so the two never compute this differently.
+fn chat_position_for(main_window: &tauri::WebviewWindow) -> Result<tauri::Position, String> {
+    let main_pos = main_window.outer_position().map_err(|e| e.to_string())?;
+    let main_size = main_window.outer_size().map_err(|e| e.to_string())?;
+    let scale_factor = main_window.scale_factor().map_err(|e| e.to_string())?;
+
+    let chat_width_physical = (CHAT_WIDTH_LOGICAL * scale_factor) as i32;
+    let chat_height_physical = (CHAT_HEIGHT_LOGICAL * scale_factor) as i32;
+
+    // Try to place it 20px above the companion's head
+    let chat_x = main_pos.x + (main_size.width as i32 / 2) - (chat_width_physical / 2);
+    let mut chat_y = main_pos.y - chat_height_physical - 20;
+
+    // If it doesn't fit on the screen above the companion, place it below instead
+    if chat_y < 20 {
+        chat_y = main_pos.y + main_size.height as i32 + 20;
+    }
+
+    Ok(tauri::Position::Physical(tauri::PhysicalPosition::new(chat_x, chat_y)))
+}
+
 /// Opens the chat popup window next to the companion, or focuses it if
 /// already open. Creates it lazily on first click rather than at startup —
 /// no point paying for a second webview before anyone asks for it.
@@ -89,26 +117,7 @@ fn toggle_chat_window(app: tauri::AppHandle) -> Result<(), String> {
         .get_webview_window(MAIN_WINDOW_LABEL)
         .ok_or_else(|| "Main window not found".to_string())?;
 
-    let main_pos = main_window.outer_position().map_err(|e| e.to_string())?;
-    let main_size = main_window.outer_size().map_err(|e| e.to_string())?;
-    let scale_factor = main_window.scale_factor().map_err(|e| e.to_string())?;
-
-    let chat_width_logical = 320.0;
-    let chat_height_logical = 420.0;
-
-    let chat_width_physical = (chat_width_logical * scale_factor) as i32;
-    let chat_height_physical = (chat_height_logical * scale_factor) as i32;
-
-    // Try to place it 20px above the companion's head
-    let chat_x = main_pos.x + (main_size.width as i32 / 2) - (chat_width_physical / 2);
-    let mut chat_y = main_pos.y - chat_height_physical - 20;
-
-    // If it doesn't fit on the screen above the companion, place it below instead
-    if chat_y < 20 {
-        chat_y = main_pos.y + main_size.height as i32 + 20;
-    }
-
-    let position = tauri::Position::Physical(tauri::PhysicalPosition::new(chat_x, chat_y));
+    let position = chat_position_for(&main_window)?;
 
     if let Some(existing) = app.get_webview_window(CHAT_WINDOW_LABEL) {
         if existing.is_visible().map_err(|e| e.to_string())? {
@@ -123,7 +132,7 @@ fn toggle_chat_window(app: tauri::AppHandle) -> Result<(), String> {
 
     let win = WebviewWindowBuilder::new(&app, CHAT_WINDOW_LABEL, WebviewUrl::App("chat/index.html".into()))
         .title("Companion Chat")
-        .inner_size(chat_width_logical, chat_height_logical)
+        .inner_size(CHAT_WIDTH_LOGICAL, CHAT_HEIGHT_LOGICAL)
         .resizable(false)
         .decorations(false) // No OS decorations
         .transparent(true)  // Semi-transparent background
@@ -201,6 +210,30 @@ fn main() {
                 .get_webview_window(MAIN_WINDOW_LABEL)
                 .expect("main window must exist");
             window.set_always_on_top(true)?;
+
+            // Keep the chat popup pinned to the companion instead of getting
+            // left behind: every time the main window moves (manual drag or
+            // the roaming timer's setPosition calls), re-run the same
+            // placement math toggle_chat_window used and slide the chat
+            // window along with it, but only while it's actually open.
+            let app_handle = app.handle().clone();
+            window.on_window_event(move |event| {
+                let WindowEvent::Moved(_) = event else {
+                    return;
+                };
+                let Some(main_window) = app_handle.get_webview_window(MAIN_WINDOW_LABEL) else {
+                    return;
+                };
+                let Some(chat_window) = app_handle.get_webview_window(CHAT_WINDOW_LABEL) else {
+                    return;
+                };
+                if !chat_window.is_visible().unwrap_or(false) {
+                    return;
+                }
+                if let Ok(position) = chat_position_for(&main_window) {
+                    let _ = chat_window.set_position(position);
+                }
+            });
 
             // Fallback access to the companion if it wanders off-screen while
             // roaming, or gets hidden some other way — click the tray icon to
