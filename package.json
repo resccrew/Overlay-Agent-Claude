@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test": "node --test src/main.test.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2"

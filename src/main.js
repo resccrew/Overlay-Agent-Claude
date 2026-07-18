@@ -32,12 +32,20 @@ const win = getCurrentWindow();
 let idleTimer = null;
 let roamInterval = null;
 
+// Bumped every time stopRoaming() runs, so an already-in-flight
+// moveToRandomSpot() (awaiting currentMonitor()/setPosition()) can notice
+// it's been superseded -- e.g. a real backend event or a user drag landed
+// while a roam move was mid-flight -- and drop its result instead of
+// repositioning the window postfactum after roaming was supposed to stop.
+let roamGeneration = 0;
+
 function applyState(state) {
   for (const s of STATES) companion.classList.remove(`state-${s}`);
   companion.classList.add(`state-${state}`);
 }
 
 function stopRoaming() {
+  roamGeneration++;
   if (idleTimer) {
     clearTimeout(idleTimer);
     idleTimer = null;
@@ -49,8 +57,9 @@ function stopRoaming() {
 }
 
 async function moveToRandomSpot() {
+  const myGeneration = roamGeneration;
   const monitor = await currentMonitor();
-  if (!monitor) return;
+  if (!monitor || roamGeneration !== myGeneration) return;
   const scale = monitor.scaleFactor || 1;
   const width = monitor.size.width / scale;
   const height = monitor.size.height / scale;
@@ -58,6 +67,7 @@ async function moveToRandomSpot() {
   const maxY = Math.max(SCREEN_MARGIN, height - WINDOW_SIZE - SCREEN_MARGIN);
   const x = SCREEN_MARGIN + Math.random() * (maxX - SCREEN_MARGIN);
   const y = SCREEN_MARGIN + Math.random() * (maxY - SCREEN_MARGIN);
+  if (roamGeneration !== myGeneration) return;
   await win.setPosition(new LogicalPosition(x, y)).catch((err) => console.error("setPosition failed", err));
 }
 

@@ -49,8 +49,8 @@ fn set_click_through(window: tauri::Window, enabled: bool) -> Result<(), String>
 /// it caused a transition, emits `companion-state-changed`. Shared by the
 /// `ingest_transcript_line` command (manual devtools testing) and the real
 /// background watcher thread spawned in `main()`.
-fn apply_line_and_emit(
-    app: &tauri::AppHandle,
+fn apply_line_and_emit<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     state: &AppState,
     line: &serde_json::Value,
 ) -> Result<Option<String>, String> {
@@ -401,4 +401,60 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running desktop companion");
+}
+
+/// Verifies the actual Rust-side wiring end to end: `apply_line_and_emit`
+/// (the exact function both `ingest_transcript_line` and
+/// `spawn_transcript_watcher` call) really reaches a real `listen()`
+/// handler through a real `AppHandle`, using Tauri's mock runtime -- not
+/// just "it compiles and the two halves look right by inspection". Doesn't
+/// cover the JS side (see `src/main.test.mjs` for that) or a real webview.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex as StdMutex};
+    use tauri::Listener;
+
+    #[test]
+    fn apply_line_and_emit_reaches_a_real_listener() {
+        let app = tauri::test::mock_app();
+        let handle = app.handle();
+
+        let received: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
+        let received_clone = received.clone();
+        handle.listen("companion-state-changed", move |event| {
+            let payload: serde_json::Value = serde_json::from_str(event.payload()).unwrap();
+            received_clone.lock().unwrap().push(payload["state"].as_str().unwrap().to_string());
+        });
+
+        let state = AppState { machine: Mutex::new(StateMachine::new()) };
+        let line = serde_json::json!({
+            "type": "assistant",
+            "message": { "content": [{ "type": "thinking", "thinking": "..." }] }
+        });
+
+        let result = apply_line_and_emit(handle, &state, &line);
+        assert_eq!(result.unwrap(), Some("thinking".to_string()));
+        assert_eq!(*received.lock().unwrap(), vec!["thinking".to_string()]);
+    }
+
+    #[test]
+    fn apply_line_and_emit_is_a_noop_for_metadata_lines() {
+        let app = tauri::test::mock_app();
+        let handle = app.handle();
+
+        let received: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
+        let received_clone = received.clone();
+        handle.listen("companion-state-changed", move |event| {
+            let payload: serde_json::Value = serde_json::from_str(event.payload()).unwrap();
+            received_clone.lock().unwrap().push(payload["state"].as_str().unwrap().to_string());
+        });
+
+        let state = AppState { machine: Mutex::new(StateMachine::new()) };
+        let line = serde_json::json!({ "type": "mode", "mode": "normal" });
+
+        let result = apply_line_and_emit(handle, &state, &line);
+        assert_eq!(result.unwrap(), None);
+        assert!(received.lock().unwrap().is_empty(), "no event should have been emitted");
+    }
 }

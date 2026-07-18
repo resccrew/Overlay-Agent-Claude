@@ -58,7 +58,15 @@ Requires the Rust toolchain (`rustup`) plus platform webview deps:
 ## Testing
 
 - `cargo test` (from repo root or `crates/companion-state/`) — unit tests for the state
-  machine and the transcript tailer/file-discovery logic
+  machine and the transcript tailer/file-discovery logic, plus (in `src-tauri/src/main.rs`)
+  a `tauri::test::mock_app()`-based test that `apply_line_and_emit` really reaches a real
+  `listen()` handler through a real `AppHandle`, not just "the two halves look right by
+  inspection"
+- `npm test` (= `node --test src/main.test.mjs`) — loads the real `src/main.js` into a
+  sandboxed `node:vm` context with a fake `window.__TAURI__`/DOM/timers and drives it with
+  a deterministic fake clock (no real waiting); covers the roaming idle-timeout, that a
+  real backend event always cancels/restarts it correctly, and the `roamGeneration` guard
+  against an in-flight move landing after being superseded
 - `tools/e2e-status-check.sh [path-to-transcript.jsonl]` — cross-checks the Rust
   `StateMachine` against the independent Node prototype
   (`tools/transcript-watcher/derive-state.mjs`) on the same real transcript (defaults to
@@ -67,6 +75,10 @@ Requires the Rust toolchain (`rustup`) plus platform webview deps:
 - `tools/soak-test.sh` — runs the built app under Xvfb for an extended period against a
   synthetically-growing transcript, sampling RSS/CPU to catch leaks or busy-looping; see
   its header comment for how to read the output
+
+None of the above drives a real webview end to end (Rust wiring and JS logic are each
+verified in isolation, not the full `emit` → real-webview → DOM chain) — that would need a
+WebDriver/`tauri-driver` setup, not yet done.
 
 ## Next up (see Notion for full breakdown)
 
