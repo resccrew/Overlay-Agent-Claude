@@ -4,7 +4,7 @@ use std::process::Command;
 use std::sync::Mutex;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use companion_state::StateMachine;
 
@@ -83,8 +83,8 @@ const CHAT_HEIGHT_LOGICAL: f64 = 420.0;
 /// Where the chat popup should sit relative to the companion right now:
 /// centered above its head, or below if that would run off the top of the
 /// screen. Shared by `toggle_chat_window` (initial placement) and the
-/// main-window `Moved` handler (keeps it pinned as the companion moves,
-/// e.g. while roaming) so the two never compute this differently.
+/// background poll loop in `main()` that keeps it pinned as the companion
+/// moves, so the two never compute this differently.
 fn chat_position_for(main_window: &tauri::WebviewWindow) -> Result<tauri::Position, String> {
     let main_pos = main_window.outer_position().map_err(|e| e.to_string())?;
     let main_size = main_window.outer_size().map_err(|e| e.to_string())?;
@@ -138,6 +138,13 @@ fn toggle_chat_window(app: tauri::AppHandle) -> Result<(), String> {
         .transparent(true)  // Semi-transparent background
         .always_on_top(true)
         .skip_taskbar(true)
+        // Without this, macOS draws its own native drop shadow around the
+        // window's *actual* (rectangular) frame on top of the rounded glass
+        // panel's own CSS box-shadow -- two overlapping shadows read as a
+        // doubled/ghosted border under the panel. The main window already
+        // gets `"shadow": false` from tauri.conf.json; this window is built
+        // in Rust, so it needs the same thing set explicitly.
+        .shadow(false)
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -212,26 +219,45 @@ fn main() {
             window.set_always_on_top(true)?;
 
             // Keep the chat popup pinned to the companion instead of getting
-            // left behind: every time the main window moves (manual drag or
-            // the roaming timer's setPosition calls), re-run the same
-            // placement math toggle_chat_window used and slide the chat
-            // window along with it, but only while it's actually open.
+            // left behind. This is a poll loop, not a `WindowEvent::Moved`
+            // listener, on purpose: dragging the companion goes through
+            // `window.startDragging()` (a native OS drag session), and that
+            // doesn't reliably surface timely Moved events through
+            // tao/wry's normal callback -- confirmed live, the event-based
+            // version left the chat window sitting still while the
+            // companion visibly walked away from it. Polling the position
+            // instead is immune to whatever's swallowing/delaying that
+            // event, at the cost of a background thread.
             let app_handle = app.handle().clone();
-            window.on_window_event(move |event| {
-                let WindowEvent::Moved(_) = event else {
-                    return;
-                };
-                let Some(main_window) = app_handle.get_webview_window(MAIN_WINDOW_LABEL) else {
-                    return;
-                };
-                let Some(chat_window) = app_handle.get_webview_window(CHAT_WINDOW_LABEL) else {
-                    return;
-                };
-                if !chat_window.is_visible().unwrap_or(false) {
-                    return;
-                }
-                if let Ok(position) = chat_position_for(&main_window) {
-                    let _ = chat_window.set_position(position);
+            std::thread::spawn(move || {
+                let mut last_main_pos: Option<(i32, i32)> = None;
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+
+                    let Some(main_window) = app_handle.get_webview_window(MAIN_WINDOW_LABEL) else {
+                        continue;
+                    };
+                    let Some(chat_window) = app_handle.get_webview_window(CHAT_WINDOW_LABEL) else {
+                        last_main_pos = None; // no chat yet -- force a fresh placement once it opens
+                        continue;
+                    };
+                    if !chat_window.is_visible().unwrap_or(false) {
+                        last_main_pos = None;
+                        continue;
+                    }
+
+                    let Ok(pos) = main_window.outer_position() else {
+                        continue;
+                    };
+                    let current = (pos.x, pos.y);
+                    if last_main_pos == Some(current) {
+                        continue;
+                    }
+                    last_main_pos = Some(current);
+
+                    if let Ok(position) = chat_position_for(&main_window) {
+                        let _ = chat_window.set_position(position);
+                    }
                 }
             });
 
