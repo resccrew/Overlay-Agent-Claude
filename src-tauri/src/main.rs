@@ -46,20 +46,16 @@ fn set_click_through(window: tauri::Window, enabled: bool) -> Result<(), String>
 }
 
 /// Feeds one already-parsed transcript line into the state machine and, if
-/// it caused a transition, emits `companion-state-changed`.
-///
-/// This is the seam the real watcher (task "Watcher/парсер транскрипта",
-/// still open) plugs into once it exists — for now it can also be called
-/// manually from the frontend devtools with a fake line to sanity-check the
-/// wiring end to end without a real transcript file yet.
-#[tauri::command]
-fn ingest_transcript_line(
-    app: tauri::AppHandle,
-    state: tauri::State<AppState>,
-    line: serde_json::Value,
+/// it caused a transition, emits `companion-state-changed`. Shared by the
+/// `ingest_transcript_line` command (manual devtools testing) and the real
+/// background watcher thread spawned in `main()`.
+fn apply_line_and_emit(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    line: &serde_json::Value,
 ) -> Result<Option<String>, String> {
     let mut machine = state.machine.lock().map_err(|e| e.to_string())?;
-    let Some(next) = machine.apply(&line) else {
+    let Some(next) = machine.apply(line) else {
         return Ok(None);
     };
     let state_str = serde_json::to_value(next)
@@ -75,6 +71,75 @@ fn ingest_transcript_line(
     )
     .map_err(|e| e.to_string())?;
     Ok(Some(state_str))
+}
+
+/// Manual escape hatch: lets the frontend devtools (or a test) feed a fake
+/// line through the exact same path the real watcher uses, without needing
+/// a real transcript file on disk.
+#[tauri::command]
+fn ingest_transcript_line(
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+    line: serde_json::Value,
+) -> Result<Option<String>, String> {
+    apply_line_and_emit(&app, &state, &line)
+}
+
+/// `~/.claude/projects` (or `%USERPROFILE%\.claude\projects` on Windows),
+/// overridable via `COMPANION_TRANSCRIPT_ROOT` for tests and for anyone
+/// running Claude Code with a non-default `CLAUDE_CONFIG_DIR`.
+fn transcript_projects_root() -> Option<std::path::PathBuf> {
+    if let Ok(root) = std::env::var("COMPANION_TRANSCRIPT_ROOT") {
+        return Some(std::path::PathBuf::from(root));
+    }
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()?;
+    Some(std::path::PathBuf::from(home).join(".claude").join("projects"))
+}
+
+/// How often to poll for newly-appended transcript lines. The rescan for
+/// a *different* file having become the most-recently-modified one (the
+/// user switched projects/sessions) is throttled separately inside
+/// `ProjectsWatcher` itself.
+const LINE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+const FILE_RESCAN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Tails whichever Claude Code transcript is currently most active and
+/// feeds every new line through the shared state machine, so
+/// `companion-state-changed` reflects real Claude Code activity without
+/// anyone having to call `ingest_transcript_line` by hand. Runs for the
+/// lifetime of the app on a dedicated thread; all failures (missing
+/// `~/.claude/projects`, a transcript that disappears mid-session, etc.)
+/// are swallowed and retried on the next scan rather than crashing the app
+/// -- the companion should degrade to looking idle, not take the window
+/// down with it.
+///
+/// All the "which file, how to switch, how to tail" logic lives in
+/// `companion_state::watcher::ProjectsWatcher` where it's covered by a
+/// `cargo test` that doesn't need this GUI shell at all; this function is
+/// just the thread + state-machine + `AppHandle::emit` wiring around it.
+fn spawn_transcript_watcher(app_handle: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        let Some(projects_root) = transcript_projects_root() else {
+            eprintln!("transcript watcher: could not determine HOME, watcher disabled");
+            return;
+        };
+
+        let mut watcher = companion_state::watcher::ProjectsWatcher::new(projects_root, FILE_RESCAN_INTERVAL);
+
+        loop {
+            std::thread::sleep(LINE_POLL_INTERVAL);
+            let lines = watcher.poll();
+            if lines.is_empty() {
+                continue;
+            }
+            let state = app_handle.state::<AppState>();
+            for line in &lines {
+                let _ = apply_line_and_emit(&app_handle, &state, line);
+            }
+        }
+    });
 }
 
 const CHAT_WIDTH_LOGICAL: f64 = 320.0;
@@ -217,6 +282,8 @@ fn main() {
                 .get_webview_window(MAIN_WINDOW_LABEL)
                 .expect("main window must exist");
             window.set_always_on_top(true)?;
+
+            spawn_transcript_watcher(app.handle().clone());
 
             // Keep the chat popup pinned to the companion instead of getting
             // left behind. This is a poll loop, not a `WindowEvent::Moved`

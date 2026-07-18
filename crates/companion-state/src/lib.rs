@@ -10,6 +10,8 @@
 
 use serde_json::Value;
 
+pub mod watcher;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CompanionState {
