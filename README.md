@@ -48,7 +48,12 @@ Requires the Rust toolchain (`rustup`) plus platform webview deps:
 - `src-tauri/capabilities/default.json` — Tauri v2 permission grants for the main window
 - `src/` — frontend (plain HTML/CSS/JS, no bundler): pixel-art sprite per state, state →
   CSS class mapping, listens for `companion-state-changed`; `src/chat/` is the chat popup,
-  wired to a real `claude -p` CLI session via `send_chat_message`
+  wired to a real `claude -p` CLI session via `send_chat_message`. Its first message tries
+  to `--resume` whichever local session `spawn_transcript_watcher` is already tailing, so
+  the popup joins the same conversation the terminal is running rather than paying for a
+  separate one. There's no way to make a chat message free -- it costs the same as typing
+  it in the terminal would -- so `--max-budget-usd` (default `1.00`, override via
+  `COMPANION_CHAT_MAX_BUDGET_USD`) caps a single reply's spend.
 
 ## Testing
 

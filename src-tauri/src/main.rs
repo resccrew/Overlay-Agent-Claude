@@ -218,12 +218,45 @@ fn toggle_chat_window(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// The session id of whichever Claude Code transcript is currently most
+/// active -- i.e. exactly the session `spawn_transcript_watcher` is
+/// tailing for the companion's status. Transcript files are named
+/// `<sessionId>.jsonl` (see `docs/claude-code-transcript.md`), so the file
+/// stem *is* the id `--resume` wants.
+///
+/// Used so the chat popup's first message joins the real, already-running
+/// local `claude` session (same conversation the user sees in their
+/// terminal) instead of starting a brand new, separately-billed one.
+fn active_terminal_session_id() -> Option<String> {
+    let projects_root = transcript_projects_root()?;
+    let path = companion_state::watcher::latest_transcript_file(&projects_root)?;
+    path.file_stem()?.to_str().map(str::to_string)
+}
+
+/// Dollar cap passed to `claude -p --max-budget-usd` per chat message, so a
+/// single reply can't run away and rack up an unbounded bill. Overridable
+/// via `COMPANION_CHAT_MAX_BUDGET_USD` for anyone who wants a tighter or
+/// looser limit than this default.
+const DEFAULT_CHAT_MAX_BUDGET_USD: &str = "1.00";
+
 /// Sends one chat message to a real Claude Code CLI (`claude -p`) and
 /// returns its reply. Each call is a real API request with real cost --
-/// confirmed live: a trivial "reply with exactly: pong" cost $0.057.
-/// There's no rate limiting or cost guard here yet; that's a deliberate
-/// gap, not an oversight -- flagging it rather than silently shipping
-/// something that spends money unattended.
+/// confirmed live: a trivial "reply with exactly: pong" cost $0.057-0.21
+/// depending on whether a fresh system-prompt cache had to be created.
+/// There is no way to make a chat message free -- sending it here costs
+/// exactly what typing the same message in the terminal would cost, since
+/// it's the same underlying API usage either way.
+///
+/// To avoid paying for *and forking* a whole separate conversation on top
+/// of whatever the user already has open in a terminal, the very first
+/// message tries to `--resume` the session `spawn_transcript_watcher` is
+/// already tailing (see `active_terminal_session_id`) -- so the popup
+/// continues that same real local session rather than starting a new one.
+/// If no local session is currently active, it falls back to starting a
+/// fresh one, same as before.
+///
+/// `--max-budget-usd` caps runaway spend on a single reply (a hard stop,
+/// not a soft warning -- the CLI itself enforces it).
 ///
 /// Deliberately does NOT pass --dangerously-skip-permissions: this chat
 /// popup should hold a conversation, not get silent shell access. Tool
@@ -235,7 +268,14 @@ fn send_chat_message(chat: tauri::State<ChatSession>, message: String) -> Result
     cmd.stdin(std::process::Stdio::null());
     cmd.arg("-p").arg(&message).arg("--output-format").arg("json");
 
-    let existing_session = chat.session_id.lock().map_err(|e| e.to_string())?.clone();
+    let max_budget = std::env::var("COMPANION_CHAT_MAX_BUDGET_USD")
+        .unwrap_or_else(|_| DEFAULT_CHAT_MAX_BUDGET_USD.to_string());
+    cmd.arg("--max-budget-usd").arg(max_budget);
+
+    let mut existing_session = chat.session_id.lock().map_err(|e| e.to_string())?.clone();
+    if existing_session.is_none() {
+        existing_session = active_terminal_session_id();
+    }
     if let Some(id) = &existing_session {
         cmd.arg("--resume").arg(id);
     }
