@@ -46,10 +46,26 @@ impl StateMachine {
         match line.get("type").and_then(Value::as_str) {
             Some("user") => self.apply_user(line),
             Some("assistant") => self.apply_assistant(line),
+            Some("system") => self.apply_system(line),
             // "queue-operation", "ai-title", "mode", "attachment", "last-prompt":
             // metadata, not state signals (see docs/claude-code-transcript.md).
             _ => None,
         }
+    }
+
+    /// A `type:"system"`/`subtype:"stop_hook_summary"` line fires whenever a
+    /// Stop hook runs, i.e. the agent turn has genuinely finished (not just
+    /// produced a text reply -- see `apply_assistant`'s `WaitingForInput`,
+    /// which fires earlier, right as that reply lands). Best-effort only:
+    /// this line only exists for users who have a Stop hook configured at
+    /// all, so plenty of real sessions will never emit it and `Done` simply
+    /// won't fire for them -- there's no universal "the whole task is over"
+    /// signal in the transcript format (see docs/claude-code-transcript.md).
+    fn apply_system(&mut self, line: &Value) -> Option<CompanionState> {
+        if line.get("subtype").and_then(Value::as_str) == Some("stop_hook_summary") {
+            return self.set(CompanionState::Done);
+        }
+        None
     }
 
     fn apply_user(&mut self, line: &Value) -> Option<CompanionState> {
@@ -181,6 +197,27 @@ mod tests {
             "message": { "content": [{ "type": "text", "text": "hey do the thing" }] }
         });
         assert_eq!(m.apply(&line), Some(CompanionState::Thinking));
+    }
+
+    #[test]
+    fn stop_hook_summary_sets_done() {
+        let mut m = StateMachine::new();
+        // Synthetic, shaped like a real line but with a made-up hook command
+        // (not copied from any real hook configuration).
+        let line = json!({
+            "type": "system",
+            "subtype": "stop_hook_summary",
+            "hookCount": 1,
+            "hookInfos": [{ "command": "~/.claude/some-example-hook.sh" }]
+        });
+        assert_eq!(m.apply(&line), Some(CompanionState::Done));
+    }
+
+    #[test]
+    fn system_line_without_stop_hook_subtype_is_noop() {
+        let mut m = StateMachine::new();
+        let line = json!({ "type": "system", "subtype": "something_else" });
+        assert_eq!(m.apply(&line), None);
     }
 
     #[test]

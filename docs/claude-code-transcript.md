@@ -33,6 +33,7 @@ One JSON object per line. `type` field observed values, from a real session:
 | `ai-title`        | session title inference (metadata)                        |
 | `mode`            | current mode, e.g. `"normal"` (metadata)                  |
 | `attachment`      | attached file reference (metadata)                        |
+| `system`          | hook lifecycle events, e.g. `subtype:"stop_hook_summary"` |
 
 `user` and `assistant` lines carry `message.content`, an array of content
 blocks. Relevant block `type`s:
@@ -54,6 +55,7 @@ Implemented and tested in `tools/transcript-watcher/derive-state.mjs`
 - `user`/`tool_result` without error → `typing` (still mid-turn)
 - `assistant`/`text` (no further tool_use in that message) → `waitingForInput`
 - `user`/`text` (fresh human message) → `thinking` (new turn just started)
+- `system`/`stop_hook_summary` → `done` (best-effort, see below)
 
 Verified against the real 626-line transcript of this very session: 266
 transitions, ending in `typing` (accurate — mid-turn while writing this).
@@ -61,17 +63,45 @@ transitions, ending in `typing` (accurate — mid-turn while writing this).
 results found independently via a separate script. See git log / run
 `node tools/transcript-watcher/derive-state.mjs <path>` yourself.
 
+Implemented identically in both `tools/transcript-watcher/derive-state.mjs`
+(Node prototype) and `crates/companion-state` (Rust, what `main.rs` actually
+runs) -- `tools/e2e-status-check.sh` cross-checks the two against the same
+real transcript on every run and fails if they disagree.
+
+## Resolved: `done`
+
+`type:"system"`, `subtype:"stop_hook_summary"` fires whenever a Stop hook
+runs -- confirmed against this session's own real transcript (this repo's
+sandbox has one configured: `~/.claude/stop-hook-git-check.sh`). That's a
+genuine "the agent turn is fully over" signal, distinct from
+`waitingForInput` (which fires earlier, right as the reply text lands, and
+can't tell "turn over" apart from "still generating more before stopping").
+
+Caveat: it's **best-effort, not universal**. Stop hooks are opt-in --
+plenty of real Claude Code users have none configured, and for them this
+line never appears, so `done` simply never fires. That's an acceptable
+gap: `waitingForInput` already covers "turn finished, nothing more
+expected" for everyone; `done` is a bonus signal for the subset of users
+who have a Stop hook, not the primary mechanism.
+
+## Resolved: `roaming` / `idle`
+
+Not derivable from the transcript — confirmed, this is by design, not a
+gap. They're a presentation-layer idle-timeout implemented in
+`src/main.js` (`startRoamIdleCountdown`): after `ROAM_IDLE_DELAY_MS` (20s)
+with no new backend state change while in `idle` or `waitingForInput`, the
+frontend switches to the `roaming` sprite and relocates the window to a
+random spot on the current monitor every `ROAM_MOVE_INTERVAL_MS` (6s),
+using `currentMonitor()` + `setPosition()`. The backend never emits
+`roaming` itself.
+
 ## Open questions / not yet resolved
 
-- `roaming` and `idle` aren't derivable from the transcript at all — they're
-  presentation-layer choices (e.g. "waitingForInput for >N seconds ⇒ start
-  roaming animation"), not signals from Claude Code itself.
-- `done` has no clear signal in this schema. Might not be a real distinct
-  state, or might map to a specific tool (e.g. a task-completion marker) we
-  haven't seen an example of yet. Left unresolved rather than guessed.
-- Multi-session / multi-project: a real desktop companion needs to pick
-  *which* transcript file to watch (most-recently-modified under
-  `~/.claude/projects/**`, most likely) — not designed yet.
-- Hook events (mentioned in the original plan) haven't been investigated —
-  this research only covers the transcript file, which turned out to be
-  sufficient for a first pass.
+- Multi-session / multi-project: `companion_state::watcher::ProjectsWatcher`
+  picks the single most-recently-modified transcript under
+  `~/.claude/projects/**`, so it follows whichever session the user
+  touched last but can't show two sessions' states at once. Fine for the
+  common case of one active session at a time; would need real design work
+  to do better.
+- Hook events beyond the Stop hook (PreToolUse, PostToolUse, etc.) haven't
+  been investigated as additional state signals.
