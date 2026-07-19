@@ -1,177 +1,410 @@
-html {
-  background: transparent;
+/* ==== Tokens ==== */
+:root {
+  --chat-bg: #150f18;
+  --chat-bg-deep: #100b13;
+  --chat-bg-bar: #1c1420;
+  --chat-bg-status: #0e0a11;
+  --chat-bg-code: #0d0910;
+  --pink: #ff3d9a;
+  --pink-soft: #ff6cb5;
+  --pink-dim: rgba(255, 61, 154, 0.35);
+  --red: #ff5f57;
+  --red-soft: #ff8a84;
+  --green: #28c840;
+  --yellow: #febc2e;
+  --txt: #ffffff;
+  --txt-80: rgba(255, 255, 255, 0.85);
+  --txt-50: rgba(255, 255, 255, 0.5);
+  --txt-35: rgba(255, 255, 255, 0.35);
+  --line: rgba(255, 255, 255, 0.08);
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --ui: system-ui, -apple-system, sans-serif;
+}
+
+html,
+body {
+  margin: 0;
   height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
 }
 
 body {
-  margin: 0;
-  padding: 10px; /* Padding allows the box-shadow to render without being clipped by the window edge */
-  height: 100vh;
+  padding: 6px; /* small inset so the rounded corners read cleanly against the transparent window */
   box-sizing: border-box;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #eee;
-  display: flex;
-  overflow: hidden;
-  background: transparent;
 }
 
-/* No backdrop-filter here on purpose: on a fully transparent Tauri/WKWebView
-   window on macOS it tries to blur whatever's on the real desktop behind the
-   window, and that sampling is unreliable -- it goes stale and doesn't
-   redraw in step with the window, which read as a smeared, shifting blob
-   instead of a clean frosted panel. A solid-ish tinted background gives the
-   same "glass" feel without depending on that broken compositing path. */
-.glass-container {
-  flex: 1;
+/* ==== Window ==== */
+/* No native OS shadow (see .shadow(false) in src-tauri/src/main.rs) and no
+   backdrop-filter here on purpose -- on a fully transparent Tauri window
+   that tries to blur real desktop content behind it, which is an
+   unreliable compositing path (confirmed live: showed up as a smeared,
+   shifting blob). This is a solid IDE-panel look instead, not glass. */
+.agent-chat {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  background: var(--chat-bg);
+  border: 1px solid rgba(255, 61, 154, 0.3);
+  border-radius: 14px;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: rgba(24, 17, 24, 0.92);
-  border: 1px solid rgba(255, 105, 180, 0.6);
-  border-radius: 20px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), inset 0 0 10px rgba(255, 105, 180, 0.2);
-  overflow: hidden;
+  font-family: var(--mono);
+  color: var(--txt);
 }
 
-header {
+/* ==== Titlebar ==== */
+.ac-titlebar {
+  flex: none;
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 12px 16px;
-  border-bottom: 1px solid rgba(255, 105, 180, 0.2);
-  background: rgba(255, 105, 180, 0.05);
-  cursor: grab;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--chat-bg-bar);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  /* The whole bar is the drag handle (data-tauri-drag-region in the HTML).
+     Default arrow cursor + no text selection so it reads as a window
+     chrome strip you grab, not selectable content. */
+  cursor: default;
+  user-select: none;
 }
-
-header:active {
-  cursor: grabbing;
-}
-
-.title {
-  font-weight: 600;
-  font-size: 14px;
-  color: #ff9ecd;
+/* pointer-events: none makes clicks on the label/live-indicator fall
+   through to the titlebar's drag region, so you can start a window drag by
+   grabbing ANY point of the bar, including right on the centered text --
+   not just the empty gaps. They're non-interactive anyway. */
+.ac-title {
+  flex: 1;
+  text-align: center;
+  font: 500 11px var(--mono);
+  color: rgba(255, 255, 255, 0.55);
   pointer-events: none;
+  user-select: none;
 }
-
-#close-btn {
+.ac-live {
+  font: 500 10px var(--mono);
+  color: var(--green);
+  pointer-events: none;
+  user-select: none;
+}
+.ac-close {
+  border: 0;
   background: none;
-  border: none;
-  color: #fff;
-  font-size: 20px;
-  line-height: 1;
+  font: 500 14px var(--mono);
+  color: rgba(255, 255, 255, 0.45);
   cursor: pointer;
-  padding: 0 4px;
-  opacity: 0.6;
-  /* header has data-tauri-drag-region -- without this the button's own
-     click can get swallowed by the window-drag gesture instead of firing.
-     Same fix already used for #companion in ../styles.css. */
+  padding: 2px 6px;
+  /* .ac-titlebar has data-tauri-drag-region -- without this the button's
+     own click gets swallowed by the window-drag gesture instead of firing.
+     Same fix used for #companion in ../styles.css. */
   -webkit-app-region: no-drag;
 }
-
-#close-btn:hover {
-  opacity: 1;
-  color: #ff69b4;
+.ac-close:hover {
+  color: var(--pink-soft);
 }
 
-#log {
+/* ==== Body: rail + chat ==== */
+.ac-body {
   flex: 1;
-  overflow-y: auto;
-  padding: 16px;
+  min-height: 0;
+  display: flex;
+}
+
+/* Session rail. Only ever shows the current session -- there is no
+   persisted session history to browse yet, so this deliberately does not
+   pretend to be a session switcher. */
+.ac-rail {
+  width: 168px;
+  flex: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.07);
+  padding: 12px 10px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 4px;
+  background: var(--chat-bg-deep);
+  box-sizing: border-box;
+}
+.ac-rail-head {
+  display: flex;
+  align-items: center;
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  color: var(--txt-35);
+  padding: 0 8px 8px;
+}
+.ac-session {
+  border-radius: 8px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+}
+.ac-session.active {
+  background: rgba(255, 61, 154, 0.15);
+  border-color: var(--pink-dim);
+}
+.ac-session .name {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+}
+.ac-session.active .name {
+  color: var(--pink-soft);
+  font-weight: 600;
+}
+.ac-session .meta {
+  font-size: 9.5px;
+  color: var(--txt-35);
+  margin-top: 2px;
+}
+.ac-new {
+  margin-top: auto;
+  text-align: center;
+  font-size: 10.5px;
+  color: var(--pink-soft);
+  border: 1px dashed rgba(255, 61, 154, 0.4);
+  border-radius: 8px;
+  padding: 7px;
+  cursor: pointer;
+}
+.ac-new:hover {
+  background: rgba(255, 61, 154, 0.1);
 }
 
-/* Default WebKit scrollbar is a plain grey system bar that clashes with
-   the glass look -- thin it out and tint it to match. */
-#log::-webkit-scrollbar {
+/* ==== Message log ==== */
+.ac-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ac-log {
+  flex: 1;
+  min-height: 0;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-y: auto;
+}
+.ac-log::-webkit-scrollbar {
   width: 6px;
 }
-#log::-webkit-scrollbar-track {
+.ac-log::-webkit-scrollbar-track {
   background: transparent;
 }
-#log::-webkit-scrollbar-thumb {
-  background: rgba(255, 105, 180, 0.35);
+.ac-log::-webkit-scrollbar-thumb {
+  background: rgba(255, 61, 154, 0.35);
   border-radius: 3px;
 }
-#log::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 105, 180, 0.55);
+.ac-log::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 61, 154, 0.55);
 }
 
-.msg { display: flex; }
-.msg-assistant { justify-content: flex-start; }
-.msg-user { justify-content: flex-end; }
-
-.bubble {
-  max-width: 85%;
-  padding: 10px 14px;
-  border-radius: 16px;
-  line-height: 1.4;
-  font-size: 14px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-  /* Claude replies can contain long unbroken tokens (URLs, paths, code) --
-     without this they'd overflow the bubble and poke past its rounded
-     corners instead of wrapping. */
-  overflow-wrap: break-word;
-  word-break: break-word;
+.ac-user {
+  color: var(--txt);
   white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.ac-user::before {
+  content: "\276f ";
+  color: var(--pink);
+  font-weight: 700;
+}
+.ac-agent {
+  color: var(--txt-80);
+  font-family: var(--ui);
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 
-.msg-assistant .bubble {
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-bottom-left-radius: 4px;
+/* Error card */
+.ac-error {
+  border-left: 3px solid var(--red);
+  background: rgba(255, 95, 87, 0.08);
+  border-radius: 0 8px 8px 0;
+  padding: 10px 12px;
+  max-width: 92%;
 }
-
-.msg-user .bubble {
-  background: rgba(255, 105, 180, 0.4);
-  border: 1px solid rgba(255, 105, 180, 0.3);
-  border-bottom-right-radius: 4px;
-  color: #fff;
-}
-
-#composer {
+.ac-error .head {
   display: flex;
-  gap: 10px;
-  padding: 12px 16px;
-  border-top: 1px solid rgba(255, 105, 180, 0.2);
-  background: rgba(0, 0, 0, 0.2);
+  align-items: center;
+  gap: 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--red-soft);
+  letter-spacing: 0.08em;
+  margin-bottom: 5px;
 }
-
-#input {
-  flex: 1;
-  padding: 10px 14px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.3);
-  color: #eee;
-  font-size: 14px;
-  transition: border-color 0.2s;
+.ac-error .msg {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  overflow-wrap: break-word;
 }
-
-#input:focus {
-  outline: none;
-  border-color: rgba(255, 105, 180, 0.6);
-  background: rgba(0, 0, 0, 0.4);
+.ac-error .actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
 }
-
-button[type="submit"] {
-  padding: 0 16px;
-  border-radius: 12px;
-  border: none;
-  background: linear-gradient(135deg, #ff69b4, #ff1493);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 600;
+.ac-btn {
+  font: 600 10.5px var(--ui);
+  border-radius: 999px;
+  padding: 4px 11px;
   cursor: pointer;
-  box-shadow: 0 4px 15px rgba(255, 105, 180, 0.3);
-  transition: transform 0.1s, box-shadow 0.1s;
+  border: 0;
+}
+.ac-btn.primary {
+  color: #180a12;
+  background: var(--pink);
+}
+.ac-btn.primary:hover {
+  background: var(--pink-soft);
+}
+.ac-btn.ghost {
+  color: var(--pink-soft);
+  background: none;
+  border: 1px solid rgba(255, 61, 154, 0.4);
+}
+.ac-btn.ghost:hover {
+  background: rgba(255, 61, 154, 0.12);
 }
 
-button[type="submit"]:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(255, 105, 180, 0.4);
+/* Code block -- plain monospace, no per-token syntax highlighting. A regex
+   highlighter would misfire unpredictably across languages on live replies;
+   better to render real content plainly than fake-highlight it wrong. */
+.ac-code {
+  flex: none;
+  background: var(--chat-bg-code);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  overflow: hidden;
+  max-width: 92%;
 }
-button[type="submit"]:active {
-  transform: translateY(1px);
+.ac-code .head {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.45);
+}
+.ac-code .copy {
+  margin-left: auto;
+  color: var(--pink-soft);
+  cursor: pointer;
+  background: none;
+  border: 0;
+  font: inherit;
+}
+.ac-code pre {
+  margin: 0;
+  padding: 12px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.8);
+  overflow-x: auto;
+  font-family: var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* "Claude is thinking" status line while a reply is in flight -- a real
+   waiting state, not a simulated tool-call trace (the backend is one
+   blocking CLI call, it doesn't stream intermediate tool steps). */
+.ac-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--txt-50);
+}
+.ac-status .dot {
+  color: var(--pink);
+  animation: ac-pulse 1.2s infinite;
+}
+.ac-caret {
+  display: inline-block;
+  width: 7px;
+  height: 12px;
+  background: var(--pink);
+  animation: ac-blink 1s step-end infinite;
+}
+@keyframes ac-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes ac-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ==== Composer ==== */
+.ac-input {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-top: 1px solid var(--line);
+}
+.ac-input .prompt {
+  font: 700 13px var(--mono);
+  color: var(--pink);
+}
+.ac-input input {
+  flex: 1;
+  background: none;
+  border: 0;
+  outline: 0;
+  font: 400 12.5px var(--mono);
+  color: var(--txt);
+  min-width: 0;
+}
+.ac-input input::placeholder {
+  color: var(--txt-35);
+}
+.ac-send {
+  font: 600 11px var(--ui);
+  color: #180a12;
+  background: var(--pink);
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 14px;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(255, 45, 120, 0.35);
+}
+.ac-send:hover {
+  background: var(--pink-soft);
+}
+.ac-send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ==== Status bar ==== */
+.ac-statusbar {
+  flex: none;
+  display: flex;
+  gap: 16px;
+  padding: 6px 14px;
+  background: var(--chat-bg-status);
+  font-size: 10px;
+  color: var(--txt-35);
+}
+.ac-statusbar .conn {
+  color: var(--green);
+}
+.ac-statusbar .right {
+  margin-left: auto;
 }

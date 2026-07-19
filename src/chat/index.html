@@ -1,26 +1,54 @@
 <!doctype html>
-<html lang="en">
+<html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <title>Companion Chat</title>
+    <title>Claude Agent Chat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="chat.css" />
   </head>
   <body>
-    <div class="glass-container">
-      <header data-tauri-drag-region>
-        <span class="title">Claude</span>
-        <button id="close-btn">&times;</button>
-      </header>
-      <main id="log" aria-live="polite">
-        <div class="msg msg-assistant">
-          <span class="bubble">Привет! Каждое сообщение — реальный вызов Claude Code (платный).</span>
+    <div class="agent-chat">
+      <!-- data-tauri-drag-region: the window is fully independent now (no
+           longer auto-pinned to the companion), so it needs to be
+           manually movable like any normal window. close-btn still needs
+           no-drag or its click gets swallowed by the drag gesture. -->
+      <div class="ac-titlebar" data-tauri-drag-region>
+        <button class="ac-close" id="close-btn">&times;</button>
+        <div class="ac-title" id="ac-title">claude agent</div>
+        <span class="ac-live">&#9679; live</span>
+      </div>
+      <div class="ac-body">
+        <aside class="ac-rail">
+          <div class="ac-rail-head"><span>СЕССИЯ</span></div>
+          <div class="ac-session active">
+            <div class="name">текущая</div>
+            <div class="meta" id="session-meta">новая &middot; 0 msgs</div>
+          </div>
+          <div class="ac-new" id="new-session-btn">+ новая сессия</div>
+        </aside>
+        <div class="ac-main">
+          <div class="ac-log" id="log" aria-live="polite">
+            <div class="ac-agent">Привет! Каждое сообщение — реальный вызов Claude Code (платный).</div>
+          </div>
+          <form class="ac-input" id="composer">
+            <span class="prompt">&#10095;</span>
+            <input id="input" type="text" placeholder="написать…" autocomplete="off" />
+            <button type="submit" class="ac-send">Send</button>
+          </form>
+          <div class="ac-statusbar">
+            <span class="conn">&#9679; connected</span>
+            <span id="status-count">0 msgs</span>
+            <span>Claude Code CLI</span>
+            <span class="right">&#9166; send</span>
+          </div>
         </div>
-      </main>
-      <form id="composer">
-        <input id="input" type="text" placeholder="Написать..." autocomplete="off" />
-        <button type="submit">Send</button>
-      </form>
+      </div>
     </div>
-    <script type="module" src="chat.js"></script>
+    <script src="chat.js"></script>
   </body>
 </html>

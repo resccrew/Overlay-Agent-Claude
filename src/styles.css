@@ -50,8 +50,24 @@ body {
 .state-waitingForInput .sprite {
   background-image: url("./assets/companion/waitingForInput.png");
 }
+/* The "error" pose is cropped from the sheet's "Excited" frame (jumping,
+   arms up, "!") -- on its own it reads as celebration, not alarm. A pulsing
+   red glow around the silhouette (drop-shadow follows the PNG's alpha, so
+   it hugs the character/icon shape rather than boxing it) disambiguates it
+   as "something's wrong" without needing a hand-drawn alarmed pose. */
 .state-error .sprite {
   background-image: url("./assets/companion/error.png");
+  animation: error-glow-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes error-glow-pulse {
+  0%,
+  100% {
+    filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35)) drop-shadow(0 0 6px rgba(255, 40, 40, 0.55));
+  }
+  50% {
+    filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35)) drop-shadow(0 0 14px rgba(255, 40, 40, 0.95));
+  }
 }
 .state-done .sprite {
   background-image: url("./assets/companion/done.png");
