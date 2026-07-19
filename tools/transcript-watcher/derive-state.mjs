@@ -69,6 +69,14 @@ class StateMachine {
         if (line.operation === "dequeue") return null; // about to start a turn; user/assistant lines will follow immediately
         return null;
 
+      // Fires when a Stop hook runs, i.e. the agent turn has genuinely
+      // finished -- best-effort only, since this line only appears for
+      // users who have a Stop hook configured at all (see
+      // docs/claude-code-transcript.md).
+      case "system":
+        if (line.subtype === "stop_hook_summary") return this.#set("done");
+        return null;
+
       default:
         // ai-title, mode, attachment, last-prompt: metadata, not state signals.
         return null;
